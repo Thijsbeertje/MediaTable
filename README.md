@@ -111,4 +111,4 @@ mediatable/
 
 ## License
 
-See [LICENSE](LICENSE). The project currently uses the MIT License.
+The standalone overlay component includes an MIT License at `overlay/kde-media-flyout-overlay/LICENSE`. That file applies to the overlay component. The repository as a whole does not currently declare a single project-wide licence; check individual components and third-party notices before reusing or redistributing them.
