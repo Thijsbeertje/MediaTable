@@ -10,15 +10,27 @@ A floating KDE Plasma media player with an interactive vinyl record, album artwo
 
 ## Features
 
-- Interactive vinyl record with playback interaction.
-- Choose between **Vinyl** (default), **Album** artwork, or **Nothing**.
-- MPRIS media-player integration.
-- Desktop card remains visible while its screen area is clear and gets out of the way when another window covers it.
-- Independent top-left hot corner and media-event popup behaviour.
-- Right-click settings menu with appearance, behaviour, and desktop options.
-- Dark, light, or system-matched theme; adjustable opacity and corner radius.
-- Adjustable hover expansion, animation speed, and temporary popup timeout.
-- Preferences persist across restarts and updates.
+- **Interactive vinyl playback:** The record rotates in sync with the selected player's position. Drag or scroll over the vinyl to scrub through a track, with the record movement following your input.
+- **Album-art player:** Displays the current track's artwork as part of the floating player, with a dedicated record-style presentation.
+- **Multiple media players:** Discovers MPRIS-compatible players and lets you switch the displayed/controlled source. Changing the selected source does not send playback commands to the players.
+- **Desktop-aware visibility:** The expanded player stays on the desktop while its area is unobstructed, then gets out of the way when a foreground window overlaps it.
+- **Quick access:** Summon the player from the invisible top-left hot corner or through external media-button and playback events.
+- **Compact and expanded presentation:** Manually summoned popups open compact; hovering expands them. After the pointer leaves, the popup collapses and follows its auto-hide behaviour.
+- **Wayland integration:** Uses a KDE/KWin visibility helper and a Wayland layer surface to behave like a lightweight desktop overlay.
+
+## Preferences
+
+Right-click the player to open its settings menu. Preferences are saved and restored across restarts.
+
+- **Artwork mode:** Choose **Vinyl** (default) for the animated, interactive record; **Album** for a static square cover; or **Nothing** to hide the artwork and give track information more room.
+- **Theme:** Use **Match system**, **Dark**, or **Light**.
+- **Background opacity:** Choose 85%, 92%, 96% (default), or 100%.
+- **Corner radius:** Choose 12, 17 (default), 22, or 26 px.
+- **Hover expansion:** Enable or disable automatic expansion when the pointer enters the player.
+- **Animation speed:** Choose Instant, Fast, Normal (default), or Slow for expansion and collapse.
+- **Popup auto-hide:** Choose 2, 4 (default), or 8 seconds, or keep temporary popups open with **Never**.
+- **Desktop visibility:** Choose whether the persistent desktop player hides when foreground windows cover its screen area (enabled by default).
+- **Reset to defaults:** Restore the original Vinyl, Dark theme and default behaviour settings.
 
 ## Requirements
 
@@ -62,21 +74,6 @@ Run `./update.sh` from the extracted project directory. It rebuilds the applicat
 ## Autostart
 
 In **System Settings → Session → Autostart**, add the top-level `run.sh` as a login script. The overlay becomes useful once an MPRIS player publishes media information.
-
-## Settings
-
-Right-click the visible player to open MediaTable settings.
-
-- **Artwork:** Vinyl (default), Album, or Nothing.
-- **Theme:** Match system, Dark, or Light.
-- **Background opacity:** 85%, 92%, 96%, or 100%.
-- **Corner radius:** 12, 17, 22, or 26 px.
-- **Hover expansion:** on/off, with Instant, Fast, Normal, or Slow animation.
-- **Temporary popup auto-hide:** 2, 4, 8 seconds, or Never.
-- **Desktop visibility:** optionally hide the desktop card when foreground windows cover its footprint.
-- **Reset to defaults:** restores the original Vinyl/Dark setup.
-
-Settings are stored through Qt `QSettings` under `THXS/MediaTable` and survive restarts and updates.
 
 ## Uninstall
 
