@@ -1,0 +1,17 @@
+{
+  "KPlugin": {
+    "Id": "thxs-media-flyout-visibility",
+    "Name": "MediaTable Popup Area Monitor",
+    "Description": "Keeps the MediaTable desktop player unobstructed and preserves a separate clickable top-left hot corner",
+    "Version": "2.2",
+    "License": "MIT",
+    "Authors": [
+      {
+        "Name": "THXS"
+      }
+    ]
+  },
+  "KPackageStructure": "KWin/Script",
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js"
+}

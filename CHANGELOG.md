@@ -11,6 +11,8 @@
 - Added an option to disable automatic hiding when foreground windows cover the card.
 - All preferences persist across restarts and updates; Reset to defaults restores the original Vinyl/Dark behaviour.
 
+# MediaTable changelog
+
 ## 0.5.36
 
 - Added a right-click settings menu to the visible player.
