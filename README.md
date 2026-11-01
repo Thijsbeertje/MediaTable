@@ -44,6 +44,8 @@ The installer creates/uses a Fedora Toolbox named `kde-media-flyout-build` and i
 
 The first installation builds the C++ overlay in Toolbox and installs/enables the KWin popup-area monitoring script.
 
+**Source archive:** [MediaTable 0.5.37 source package](dist/mediatable-0.5.37.tar.gz).
+
 ## Test mode
 
 To show a test card without an active media player:
@@ -111,4 +113,4 @@ mediatable/
 
 ## License
 
-See [LICENSE](LICENSE). The project currently uses the MIT License.
+The overlay component includes its MIT licence at `overlay/kde-media-flyout-overlay/LICENSE`. No repository-wide licence has been selected yet.
