@@ -1,9 +1,12 @@
+
 # MediaTable
 
 A floating KDE Plasma media player with an interactive vinyl record, album artwork mode, and desktop-aware visibility.
 
 **Current baseline:** 0.5.37  
 **Target platform:** KDE Plasma 6 on Wayland (tested by the author on Bazzite)
+
+<img width="1797" height="875" alt="Polished Liquid Crystal Music Player" src="https://github.com/user-attachments/assets/2c855ee5-b8eb-4c4c-b718-e57720701dbb" />
 
 ## Features
 
