@@ -3300,7 +3300,7 @@ private:
                 Buffer(static_cast<uint32_t>(byteCount)),
                 static_cast<uint32_t>(byteCount),
                 InputStreamOptions::None).get();
-            const DataReader reader = DataReader::FromBuffer(buffer);
+            DataReader reader = DataReader::FromBuffer(buffer);
             std::vector<uint8_t> bytes(buffer.Length());
             reader.ReadBytes(winrt::array_view<uint8_t>(bytes));
 
@@ -3393,9 +3393,8 @@ private:
             const qint64 positionTicks = timeline.Position().count();
             state.lengthUsec = std::max<qint64>(0, endTicks - startTicks) / 10;
             state.positionUsec = std::max<qint64>(0, positionTicks) / 10;
-            const double reportedRate = timeline.PlaybackRate();
-            state.rate = std::isfinite(reportedRate) && reportedRate > 0.0
-                ? reportedRate : 1.0;
+            // GSMTC timeline snapshots do not expose a playback-rate value.
+            state.rate = 1.0;
         } catch (const winrt::hresult_error &) {
             return {};
         }
@@ -3430,12 +3429,6 @@ private:
             try {
                 const Session &session = it->second;
                 if (command.isSeek) {
-                    const auto currentIt = std::find_if(
-                        m_players.cbegin(), m_players.cend(),
-                        [&command](const PlayerState &player) {
-                            return player.service == command.service;
-                        });
-                    Q_UNUSED(currentIt);
                     // Use the latest timeline position from the worker's session.
                     const qint64 targetUsec = std::max<qint64>(
                         0, m_workerPositions[command.service] + command.offsetUsec);
