@@ -323,23 +323,23 @@ bool hasUsableTrackMetadata(const PlayerState &state)
     return !state.title.isEmpty()
         && state.title != QStringLiteral("Now playing");
 }
+#endif
 
+// Track identity is shared by the Qt UI. Only the Firefox/MPRIS fallback is
+// Linux-specific; Windows sessions use their source identity and track metadata.
 bool isSameTrack(const PlayerState &previous, const PlayerState &next)
 {
     if (previous.service.isEmpty() || previous.service != next.service) {
         return false;
     }
 
+#ifndef Q_OS_WIN
     const bool isFirefox = next.service.contains(QStringLiteral("firefox"),
                                                   Qt::CaseInsensitive);
     if (isFirefox) {
         // Firefox may change mpris:trackid during a seek or metadata refresh even
         // though the same video is still active. Use the stable application +
-        // title/artist/album identity for the local position fallback: compare
-        // usable metadata first and
-        // treat incomplete snapshots as transient rather than as a new track.
-        // This prevents a seek from clearing the local position estimate, which
-        // otherwise makes reverse seeks clamp at zero and resets the platter.
+        // title/artist/album identity for the local position fallback.
         const bool previousHasMetadata = hasUsableTrackMetadata(previous);
         const bool nextHasMetadata = hasUsableTrackMetadata(next);
         if (previousHasMetadata && nextHasMetadata) {
@@ -355,6 +355,7 @@ bool isSameTrack(const PlayerState &previous, const PlayerState &next)
         }
         return true; // One snapshot is temporarily incomplete.
     }
+#endif
 
     if (!previous.trackId.isEmpty() && !next.trackId.isEmpty()) {
         return previous.trackId == next.trackId;
@@ -363,6 +364,7 @@ bool isSameTrack(const PlayerState &previous, const PlayerState &next)
     return previous.title == next.title && previous.artist == next.artist;
 }
 
+#ifndef Q_OS_WIN
 PlayerState readPlayerState(const QDBusConnection &bus, const QString &service)
 {
     PlayerState state;
