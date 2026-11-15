@@ -14,6 +14,7 @@ else()
     find_package(LayerShellQt REQUIRED CONFIG)
 endif()
 
+# Keep the original target name because the Linux Toolbox launcher expects it.
 add_executable(kde-media-flyout-overlay
     src/main.cpp
 )
@@ -24,9 +25,15 @@ target_link_libraries(kde-media-flyout-overlay PRIVATE
 )
 
 if(WIN32)
-    target_compile_definitions(kde-media-flyout-overlay PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(kde-media-flyout-overlay PRIVATE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+    )
+    set_target_properties(kde-media-flyout-overlay PROPERTIES
+        OUTPUT_NAME "MediaTable"
+    )
 else()
-    target_link_libraries(mediatable PRIVATE
+    target_link_libraries(kde-media-flyout-overlay PRIVATE
         Qt6::DBus
         LayerShellQt::Interface
     )
@@ -35,14 +42,7 @@ endif()
 if(MSVC)
     target_compile_options(kde-media-flyout-overlay PRIVATE /W4 /permissive-)
 else()
-    target_compile_options(mediatable PRIVATE -Wall -Wextra -Wpedantic)
-endif()
-
-if(WIN32)
-    # Keep the existing Linux binary name for the Toolbox run.sh launcher.
-    set_target_properties(kde-media-flyout-overlay PROPERTIES
-        OUTPUT_NAME "MediaTable"
-    )
+    target_compile_options(kde-media-flyout-overlay PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 install(TARGETS kde-media-flyout-overlay
