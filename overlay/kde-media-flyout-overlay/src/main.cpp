@@ -1354,7 +1354,13 @@ public:
         demo.canPause = true;
         demo.canSeek = true;
         setPlayerState(demo);
+#ifdef Q_OS_WIN
+        // A test preview should remain visible for inspection instead of using
+        // the normal short-lived popup auto-hide behaviour.
+        activateOnDesktop();
+#else
         showCompactCard();
+#endif
     }
 
 protected:
