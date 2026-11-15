@@ -28,3 +28,17 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: Deploy Qt runtime
+        run: '& "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations "build\Release\MediaTable.exe"'
+
+      - name: Package preview
+        run: Compress-Archive -Path "build\Release\*" -DestinationPath "build\MediaTable-Windows.zip" -Force
+
+      - name: Upload preview package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaTable-Windows-preview
+          path: build/MediaTable-Windows.zip
+          if-no-files-found: error
+          retention-days: 14
