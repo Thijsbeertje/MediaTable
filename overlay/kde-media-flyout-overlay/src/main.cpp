@@ -1,4 +1,4 @@
-#ifndef Q_OS_WIN
+#ifndef _WIN32
 #include <LayerShellQt/Shell>
 #include <LayerShellQt/Window>
 #include <QDBusArgument>
