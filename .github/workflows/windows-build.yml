@@ -32,15 +32,25 @@ jobs:
       - name: Deploy Qt runtime
         run: '& "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations "build\Release\MediaTable.exe"'
 
-      - name: Create preview launcher
+      - name: Create diagnostic preview launcher
         shell: pwsh
         run: |
           @'
           @echo off
           setlocal
           cd /d "%~dp0"
-          start "" "%~dp0MediaTable.exe" --test
-          endlocal
+          echo Starting MediaTable Windows preview...
+          echo The preview should appear near the top-left of your main display.
+          echo.
+          "%~dp0MediaTable.exe" --test > "%~dp0MediaTable-startup.log" 2>&1
+          set "APP_EXIT=%ERRORLEVEL%"
+          echo.
+          echo MediaTable exited with code %APP_EXIT%.
+          echo Startup log:
+          if exist "%~dp0MediaTable-startup.log" type "%~dp0MediaTable-startup.log"
+          echo.
+          pause
+          exit /b %APP_EXIT%
           '@ | Set-Content -Path "build\Release\Run-MediaTable-Preview.bat" -Encoding Ascii
 
       - name: Upload Windows preview
