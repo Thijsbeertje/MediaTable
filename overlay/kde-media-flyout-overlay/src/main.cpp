@@ -52,6 +52,27 @@
 #include <QVariantMap>
 #include <QWidget>
 #include <QWheelEvent>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFileInfo>
+#include <QMetaObject>
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <map>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#ifdef _WIN32
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Media.Control.h>
+#include <winrt/Windows.Storage.Streams.h>
+#include <winrt/base.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -3177,6 +3198,535 @@ private:
     bool m_testMode = false;
     bool m_haveCurrentPlayer = false;
 };
+
+#else
+// Windows media integration uses the Global System Media Transport Controls
+// (GSMTC) API. All WinRT work runs on a dedicated MTA thread so asynchronous
+// Windows media calls never block the Qt GUI thread.
+class MediaController final : public QObject
+{
+public:
+    explicit MediaController(MediaOverlay *overlay, bool testMode)
+        : m_overlay(overlay)
+        , m_testMode(testMode)
+    {
+        m_overlay->setControlCallback([this](const QString &method) {
+            sendPlayerMethod(method);
+        });
+        m_overlay->setSeekCallback([this](qint64 offsetUsec) {
+            sendSeekOffset(offsetUsec);
+        });
+        m_overlay->setPlayerSwitchCallback([this] {
+            cyclePlayer();
+        });
+
+        m_localControlEchoTimer.setSingleShot(true);
+        m_localControlEchoTimer.setInterval(2200);
+        QObject::connect(&m_localControlEchoTimer, &QTimer::timeout, this, [this] {
+            m_localControlEchoService.clear();
+            m_localControlTrackChangeExpected = false;
+            m_localControlPlaybackChangeExpected = false;
+        });
+
+        if (!m_testMode) {
+            m_worker = std::thread([this] {
+                workerMain();
+            });
+        }
+    }
+
+    ~MediaController() override
+    {
+        m_stop.store(true);
+        m_workerWake.notify_all();
+        if (m_worker.joinable()) {
+            m_worker.join();
+        }
+    }
+
+private:
+    struct Command
+    {
+        QString service;
+        QString method;
+        qint64 offsetUsec = 0;
+        bool isSeek = false;
+    };
+
+    using Session = winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSession;
+    using SessionManager =
+        winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+
+    static QString fromHString(const winrt::hstring &value)
+    {
+        return QString::fromStdWString(value.c_str());
+    }
+
+    static QString cacheThumbnail(
+        const winrt::Windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties &properties,
+        const QString &cacheKey)
+    {
+        using namespace winrt::Windows::Storage::Streams;
+
+        const QString artworkDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+            + QStringLiteral("/artwork");
+        if (!QDir().mkpath(artworkDirectory)) {
+            return {};
+        }
+
+        const QString imagePath = artworkDirectory + QLatin1Char('/')
+            + QString::fromLatin1(QCryptographicHash::hash(
+                cacheKey.toUtf8(), QCryptographicHash::Sha256).toHex())
+            + QStringLiteral(".img");
+        if (QFileInfo::exists(imagePath)) {
+            return QUrl::fromLocalFile(imagePath).toString();
+        }
+
+        try {
+            const auto thumbnail = properties.Thumbnail();
+            if (!thumbnail) {
+                return {};
+            }
+
+            const auto stream = thumbnail.OpenReadAsync().get();
+            const uint64_t byteCount = stream.Size();
+            constexpr uint64_t MaximumArtworkBytes = 12ULL * 1024ULL * 1024ULL;
+            if (byteCount == 0 || byteCount > MaximumArtworkBytes) {
+                return {};
+            }
+
+            const auto buffer = stream.ReadAsync(
+                Buffer(static_cast<uint32_t>(byteCount)),
+                static_cast<uint32_t>(byteCount),
+                InputStreamOptions::None).get();
+            const DataReader reader = DataReader::FromBuffer(buffer);
+            std::vector<uint8_t> bytes(buffer.Length());
+            reader.ReadBytes(winrt::array_view<uint8_t>(bytes));
+
+            QFile imageFile(imagePath);
+            if (!imageFile.open(QIODevice::WriteOnly)) {
+                return {};
+            }
+            if (imageFile.write(reinterpret_cast<const char *>(bytes.data()),
+                                static_cast<qint64>(bytes.size()))
+                != static_cast<qint64>(bytes.size())) {
+                imageFile.close();
+                imageFile.remove();
+                return {};
+            }
+            imageFile.close();
+            return QUrl::fromLocalFile(imagePath).toString();
+        } catch (const winrt::hresult_error &) {
+            return {};
+        }
+    }
+
+    static PlayerState readSessionState(const Session &session)
+    {
+        using namespace winrt::Windows::Media::Control;
+
+        PlayerState state;
+        const QString appId = fromHString(session.SourceAppUserModelId()).trimmed();
+        if (appId.isEmpty()) {
+            return state;
+        }
+
+        state.service = QStringLiteral("windows:") + appId;
+        state.identity = appId;
+        const int packageSeparator = state.identity.lastIndexOf(QLatin1Char('!'));
+        if (packageSeparator >= 0) {
+            state.identity = state.identity.mid(packageSeparator + 1);
+        }
+        if (state.identity.endsWith(QStringLiteral(".exe"), Qt::CaseInsensitive)) {
+            state.identity.chop(4);
+        }
+
+        try {
+            const auto properties = session.TryGetMediaPropertiesAsync().get();
+            if (!properties) {
+                return {};
+            }
+
+            state.title = fromHString(properties.Title()).trimmed();
+            state.artist = fromHString(properties.Artist()).trimmed();
+            state.album = fromHString(properties.AlbumTitle()).trimmed();
+            if (state.title.isEmpty()) {
+                state.title = QStringLiteral("Now playing");
+            }
+            if (state.artist.isEmpty()) {
+                state.artist = state.identity;
+            }
+
+            const QString trackIdentity = state.service + QLatin1Char('|')
+                + state.title + QLatin1Char('|') + state.artist + QLatin1Char('|')
+                + state.album;
+            state.trackId = QString::fromLatin1(QCryptographicHash::hash(
+                trackIdentity.toUtf8(), QCryptographicHash::Sha256).toHex());
+            state.artUrl = cacheThumbnail(properties, trackIdentity);
+
+            const auto playbackInfo = session.GetPlaybackInfo();
+            const auto controls = playbackInfo.Controls();
+            switch (playbackInfo.PlaybackStatus()) {
+            case GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing:
+                state.playbackStatus = QStringLiteral("Playing");
+                break;
+            case GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused:
+                state.playbackStatus = QStringLiteral("Paused");
+                break;
+            default:
+                state.playbackStatus = QStringLiteral("Stopped");
+                break;
+            }
+
+            state.canGoPrevious = controls.IsPreviousEnabled();
+            state.canGoNext = controls.IsNextEnabled();
+            state.canPlay = controls.IsPlayEnabled()
+                || controls.IsPlayPauseToggleEnabled();
+            state.canPause = controls.IsPauseEnabled()
+                || controls.IsPlayPauseToggleEnabled();
+            state.canSeek = controls.IsPlaybackPositionEnabled();
+
+            const auto timeline = session.GetTimelineProperties();
+            const qint64 startTicks = timeline.StartTime().count();
+            const qint64 endTicks = timeline.EndTime().count();
+            const qint64 positionTicks = timeline.Position().count();
+            state.lengthUsec = std::max<qint64>(0, endTicks - startTicks) / 10;
+            state.positionUsec = std::max<qint64>(0, positionTicks) / 10;
+            const double reportedRate = timeline.PlaybackRate();
+            state.rate = std::isfinite(reportedRate) && reportedRate > 0.0
+                ? reportedRate : 1.0;
+        } catch (const winrt::hresult_error &) {
+            return {};
+        }
+
+        return state.isValid() ? state : PlayerState{};
+    }
+
+    void enqueueCommand(Command command)
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_commandMutex);
+            m_commands.push_back(std::move(command));
+        }
+        m_workerWake.notify_one();
+    }
+
+    void processCommands(
+        const std::map<std::wstring, Session> &sessions)
+    {
+        std::deque<Command> pending;
+        {
+            std::lock_guard<std::mutex> lock(m_commandMutex);
+            pending.swap(m_commands);
+        }
+
+        for (const Command &command : pending) {
+            const auto it = sessions.find(command.service.toStdWString());
+            if (it == sessions.end()) {
+                continue;
+            }
+
+            try {
+                const Session &session = it->second;
+                if (command.isSeek) {
+                    const auto currentIt = std::find_if(
+                        m_players.cbegin(), m_players.cend(),
+                        [&command](const PlayerState &player) {
+                            return player.service == command.service;
+                        });
+                    Q_UNUSED(currentIt);
+                    // Use the latest timeline position from the worker's session.
+                    const qint64 targetUsec = std::max<qint64>(
+                        0, m_workerPositions[command.service] + command.offsetUsec);
+                    const qint64 clampedUsec = m_workerLengths[command.service] > 0
+                        ? std::min(targetUsec, m_workerLengths[command.service])
+                        : targetUsec;
+                    session.TryChangePlaybackPositionAsync(clampedUsec * 10).get();
+                } else if (command.method == QStringLiteral("Next")) {
+                    session.TrySkipNextAsync().get();
+                } else if (command.method == QStringLiteral("Previous")) {
+                    session.TrySkipPreviousAsync().get();
+                } else if (command.method == QStringLiteral("PlayPause")) {
+                    session.TryTogglePlayPauseAsync().get();
+                } else if (command.method == QStringLiteral("Play")) {
+                    session.TryPlayAsync().get();
+                } else if (command.method == QStringLiteral("Pause")) {
+                    session.TryPauseAsync().get();
+                }
+            } catch (const winrt::hresult_error &error) {
+                qWarning().noquote() << "Windows media command failed:"
+                                     << fromHString(error.message());
+            }
+        }
+    }
+
+    void workerMain()
+    {
+        try {
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        } catch (const winrt::hresult_error &error) {
+            qWarning().noquote() << "Could not initialize the Windows media apartment:"
+                                 << fromHString(error.message());
+            return;
+        }
+
+        SessionManager manager{nullptr};
+        std::map<std::wstring, Session> sessions;
+        auto nextManagerRetry = std::chrono::steady_clock::time_point::min();
+
+        while (!m_stop.load()) {
+            const auto now = std::chrono::steady_clock::now();
+            if (!manager && now >= nextManagerRetry) {
+                try {
+                    manager = SessionManager::RequestAsync().get();
+                    qInfo() << "Windows media-session manager connected.";
+                } catch (const winrt::hresult_error &error) {
+                    qWarning().noquote() << "Windows media-session manager is not ready:"
+                                         << fromHString(error.message());
+                }
+                nextManagerRetry = now + std::chrono::seconds(4);
+            }
+
+            processCommands(sessions);
+
+            if (manager) {
+                QList<PlayerState> snapshot;
+                std::map<std::wstring, Session> currentSessions;
+                try {
+                    const auto availableSessions = manager.GetSessions();
+                    for (const Session &session : availableSessions) {
+                        PlayerState player = readSessionState(session);
+                        if (player.service.isEmpty()) {
+                            continue;
+                        }
+                        currentSessions.emplace(player.service.toStdWString(), session);
+                        m_workerPositions[player.service] = player.positionUsec;
+                        m_workerLengths[player.service] = player.lengthUsec;
+                        snapshot.append(std::move(player));
+                    }
+
+                    std::sort(snapshot.begin(), snapshot.end(),
+                              [](const PlayerState &left, const PlayerState &right) {
+                        return left.service < right.service;
+                    });
+                    sessions = std::move(currentSessions);
+                    QMetaObject::invokeMethod(
+                        this,
+                        [this, snapshot = std::move(snapshot)]() mutable {
+                            applySnapshot(std::move(snapshot));
+                        },
+                        Qt::QueuedConnection);
+                } catch (const winrt::hresult_error &error) {
+                    qWarning().noquote() << "Could not read Windows media sessions:"
+                                         << fromHString(error.message());
+                }
+            }
+
+            std::unique_lock<std::mutex> lock(m_commandMutex);
+            m_workerWake.wait_for(lock, std::chrono::milliseconds(700), [this] {
+                return m_stop.load() || !m_commands.empty();
+            });
+        }
+
+        sessions.clear();
+        m_workerPositions.clear();
+        m_workerLengths.clear();
+        winrt::uninit_apartment();
+    }
+
+    void applySnapshot(QList<PlayerState> players)
+    {
+        if (m_testMode) {
+            return;
+        }
+
+        m_players = std::move(players);
+        m_overlay->setAvailablePlayerCount(m_players.size());
+
+        QString newlyPlayingService;
+        QHash<QString, QString> currentStatuses;
+        for (const PlayerState &player : m_players) {
+            currentStatuses.insert(player.service, player.playbackStatus);
+            const auto previous = m_previousPlaybackStatuses.constFind(player.service);
+            if (previous != m_previousPlaybackStatuses.cend()
+                && previous.value() != player.playbackStatus && player.isPlaying()) {
+                newlyPlayingService = player.service;
+            }
+        }
+        m_previousPlaybackStatuses = std::move(currentStatuses);
+
+        if (m_players.isEmpty()) {
+            if (m_haveCurrentPlayer && !m_selectedService.isEmpty()) {
+                if (!m_selectedPlayerMissingClock.isValid()) {
+                    m_selectedPlayerMissingClock.start();
+                }
+                if (m_selectedPlayerMissingClock.elapsed()
+                    < SelectedPlayerMissingGraceMilliseconds) {
+                    return;
+                }
+            }
+            m_current = {};
+            m_selectedService.clear();
+            m_haveCurrentPlayer = false;
+            m_selectedPlayerMissingClock.invalidate();
+            return;
+        }
+
+        auto selectedIt = m_players.cend();
+        if (!newlyPlayingService.isEmpty()) {
+            selectedIt = std::find_if(
+                m_players.cbegin(), m_players.cend(),
+                [&newlyPlayingService](const PlayerState &player) {
+                    return player.service == newlyPlayingService;
+                });
+        }
+
+        if (selectedIt == m_players.cend() && !m_selectedService.isEmpty()) {
+            selectedIt = std::find_if(
+                m_players.cbegin(), m_players.cend(),
+                [this](const PlayerState &player) {
+                    return player.service == m_selectedService;
+                });
+        }
+
+        if (selectedIt == m_players.cend()
+            && m_haveCurrentPlayer && !m_selectedService.isEmpty()) {
+            if (!m_selectedPlayerMissingClock.isValid()) {
+                m_selectedPlayerMissingClock.start();
+            }
+            if (m_selectedPlayerMissingClock.elapsed()
+                < SelectedPlayerMissingGraceMilliseconds) {
+                return;
+            }
+        }
+
+        PlayerState selected;
+        if (selectedIt != m_players.cend()) {
+            selected = *selectedIt;
+        } else {
+            const auto playingIt = std::find_if(
+                m_players.cbegin(), m_players.cend(),
+                [](const PlayerState &player) { return player.isPlaying(); });
+            selected = playingIt != m_players.cend()
+                ? *playingIt : m_players.constFirst();
+        }
+
+        m_selectedPlayerMissingClock.invalidate();
+        const bool hadCurrentPlayer = m_haveCurrentPlayer;
+        const bool playerChanged = !m_haveCurrentPlayer
+            || m_current.service != selected.service;
+        const bool trackChanged = m_haveCurrentPlayer
+            && m_current.service == selected.service
+            && (m_current.title != selected.title
+                || m_current.artist != selected.artist
+                || m_current.album != selected.album);
+        const bool playbackChanged = m_haveCurrentPlayer
+            && m_current.service == selected.service
+            && m_current.playbackStatus != selected.playbackStatus;
+
+        m_selectedService = selected.service;
+        m_selectedIdentity = selected.identity;
+        m_current = selected;
+        m_haveCurrentPlayer = true;
+        m_overlay->setPlayerState(selected);
+
+        const bool localTrackChangeEcho = trackChanged
+            && m_localControlEchoTimer.isActive()
+            && m_localControlTrackChangeExpected
+            && selected.service == m_localControlEchoService;
+        const bool localPlaybackChangeEcho = playbackChanged
+            && m_localControlEchoTimer.isActive()
+            && m_localControlPlaybackChangeExpected
+            && selected.service == m_localControlEchoService;
+
+        if (!hadCurrentPlayer) {
+            m_overlay->activateOnDesktop();
+        } else if (playerChanged
+                   || (playbackChanged && !localPlaybackChangeEcho)
+                   || (trackChanged && !localTrackChangeEcho
+                       && m_overlay->shouldTreatTrackChangeAsPopupEvent())) {
+            m_overlay->showCompactCard();
+        }
+    }
+
+    void cyclePlayer()
+    {
+        if (m_players.size() < 2) {
+            return;
+        }
+
+        int currentIndex = -1;
+        for (int i = 0; i < m_players.size(); ++i) {
+            if (m_players.at(i).service == m_selectedService) {
+                currentIndex = i;
+                break;
+            }
+        }
+
+        const int nextIndex = (currentIndex + 1) % m_players.size();
+        const PlayerState nextPlayer = m_players.at(nextIndex);
+        if (nextPlayer.service == m_selectedService) {
+            return;
+        }
+
+        m_selectedService = nextPlayer.service;
+        m_selectedIdentity = nextPlayer.identity;
+        m_selectedPlayerMissingClock.invalidate();
+        m_current = nextPlayer;
+        m_haveCurrentPlayer = true;
+        m_overlay->setPlayerState(nextPlayer);
+    }
+
+    void sendPlayerMethod(const QString &method)
+    {
+        if (m_current.service.isEmpty()) {
+            return;
+        }
+
+        const bool expectsTrackChange = method == QStringLiteral("Next")
+            || method == QStringLiteral("Previous");
+        const bool expectsPlaybackChange = method == QStringLiteral("PlayPause")
+            || method == QStringLiteral("Play")
+            || method == QStringLiteral("Pause");
+        if (expectsTrackChange || expectsPlaybackChange) {
+            m_localControlEchoService = m_current.service;
+            m_localControlTrackChangeExpected = expectsTrackChange;
+            m_localControlPlaybackChangeExpected = expectsPlaybackChange;
+            m_localControlEchoTimer.start();
+        }
+
+        enqueueCommand(Command{m_current.service, method, 0, false});
+    }
+
+    void sendSeekOffset(qint64 offsetUsec)
+    {
+        if (m_current.service.isEmpty() || !m_current.canSeek || offsetUsec == 0) {
+            return;
+        }
+        enqueueCommand(Command{m_current.service, {}, offsetUsec, true});
+    }
+
+    MediaOverlay *m_overlay = nullptr;
+    bool m_testMode = false;
+    std::thread m_worker;
+    std::atomic_bool m_stop{false};
+    std::mutex m_commandMutex;
+    std::condition_variable m_workerWake;
+    std::deque<Command> m_commands;
+    QTimer m_localControlEchoTimer;
+    QHash<QString, QString> m_previousPlaybackStatuses;
+    QList<PlayerState> m_players;
+    PlayerState m_current;
+    QString m_selectedService;
+    QString m_selectedIdentity;
+    QElapsedTimer m_selectedPlayerMissingClock;
+    bool m_haveCurrentPlayer = false;
+
+    // Accessed only by the dedicated Windows media worker thread.
+    QHash<QString, qint64> m_workerPositions;
+    QHash<QString, qint64> m_workerLengths;
+};
 #endif // !Q_OS_WIN
 
 int main(int argc, char *argv[])
@@ -3204,17 +3754,17 @@ int main(int argc, char *argv[])
     hotCorner.show();
     hotCorner.raise();
 
-    // The Windows media-session backend is a later milestone. Test mode already
-    // exercises the real shared player UI without depending on a media session.
     overlay.setPopupAreaBlocked(false);
+    MediaController controller(&overlay, testMode);
+    Q_UNUSED(controller);
+
     if (testMode) {
         QTimer::singleShot(250, &overlay, [&overlay] {
             overlay.showTestCard();
         });
         QTimer::singleShot(60000, &app, &QCoreApplication::quit);
     } else {
-        qInfo() << "Windows media integration is not available yet. "
-                   "Launch with --test to preview the MediaTable overlay.";
+        qInfo() << "MediaTable is monitoring Windows media sessions.";
     }
 
     return app.exec();
