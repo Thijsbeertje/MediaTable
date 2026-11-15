@@ -53,6 +53,25 @@ jobs:
           exit /b %APP_EXIT%
           '@ | Set-Content -Path "build\Release\Run-MediaTable-Preview.bat" -Encoding Ascii
 
+          @'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          echo Starting MediaTable...
+          echo MediaTable will appear when Windows reports an active media session.
+          echo Keep this window open to view startup diagnostics.
+          echo.
+          "%~dp0MediaTable.exe" > "%~dp0MediaTable-startup.log" 2>&1
+          set "APP_EXIT=%ERRORLEVEL%"
+          echo.
+          echo MediaTable exited with code %APP_EXIT%.
+          echo Startup log:
+          if exist "%~dp0MediaTable-startup.log" type "%~dp0MediaTable-startup.log"
+          echo.
+          pause
+          exit /b %APP_EXIT%
+          '@ | Set-Content -Path "build\Release\Run-MediaTable.bat" -Encoding Ascii
+
       - name: Upload Windows preview
         uses: actions/upload-artifact@v4
         with:
