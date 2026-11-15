@@ -32,13 +32,21 @@ jobs:
       - name: Deploy Qt runtime
         run: '& "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-translations "build\Release\MediaTable.exe"'
 
-      - name: Package preview
-        run: Compress-Archive -Path "build\Release\*" -DestinationPath "build\MediaTable-Windows.zip" -Force
+      - name: Create preview launcher
+        shell: pwsh
+        run: |
+          @'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          start "" "%~dp0MediaTable.exe" --test
+          endlocal
+          '@ | Set-Content -Path "build\Release\Run-MediaTable-Preview.bat" -Encoding Ascii
 
-      - name: Upload preview package
+      - name: Upload Windows preview
         uses: actions/upload-artifact@v4
         with:
           name: MediaTable-Windows-preview
-          path: build/MediaTable-Windows.zip
+          path: build/Release/
           if-no-files-found: error
           retention-days: 14
