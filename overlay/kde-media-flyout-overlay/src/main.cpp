@@ -69,6 +69,7 @@
 
 #ifdef _WIN32
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/base.h>
@@ -3488,7 +3489,9 @@ private:
                 std::map<std::wstring, Session> currentSessions;
                 try {
                     const auto availableSessions = manager.GetSessions();
-                    for (const Session &session : availableSessions) {
+                    for (uint32_t sessionIndex = 0;
+                         sessionIndex < availableSessions.Size(); ++sessionIndex) {
+                        const Session session = availableSessions.GetAt(sessionIndex);
                         PlayerState player = readSessionState(session);
                         if (player.service.isEmpty()) {
                             continue;
@@ -3708,6 +3711,9 @@ private:
     std::condition_variable m_workerWake;
     std::deque<Command> m_commands;
     QTimer m_localControlEchoTimer;
+    QString m_localControlEchoService;
+    bool m_localControlTrackChangeExpected = false;
+    bool m_localControlPlaybackChangeExpected = false;
     QHash<QString, QString> m_previousPlaybackStatuses;
     QList<PlayerState> m_players;
     PlayerState m_current;
