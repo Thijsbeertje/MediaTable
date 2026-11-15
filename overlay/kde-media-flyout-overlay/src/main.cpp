@@ -3205,7 +3205,7 @@ int main(int argc, char *argv[])
         QTimer::singleShot(250, &overlay, [&overlay] {
             overlay.showTestCard();
         });
-        QTimer::singleShot(9000, &app, &QCoreApplication::quit);
+        QTimer::singleShot(60000, &app, &QCoreApplication::quit);
     } else {
         qInfo() << "Windows media integration is not available yet. "
                    "Launch with --test to preview the MediaTable overlay.";
