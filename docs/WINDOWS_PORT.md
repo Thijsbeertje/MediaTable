@@ -12,9 +12,19 @@ The first Windows milestone is a Qt-based preview build:
 - Builds without Linux-only D-Bus and LayerShellQt dependencies.
 - Does not yet include Windows media-session discovery or desktop occlusion detection.
 
-The Windows test mode displays the existing sample card and exits after nine seconds, matching the current Linux test-mode behaviour.
+The preview launcher displays the existing sample card for 60 seconds, then exits automatically.
 
-## Build requirements
+## Download and run
+
+Download the **MediaTable-Windows-preview** artifact from the latest successful Windows build workflow on the `windows-port` branch. Extract the downloaded ZIP once, then double-click:
+
+```text
+Run-MediaTable-Preview.bat
+```
+
+The batch file starts `MediaTable.exe --test`. Keep the Qt DLLs and plugin folders next to the executable; do not move the executable out of the extracted folder.
+
+## Build requirements (only if building from source)
 
 - Windows 10/11 x64
 - Visual Studio 2022 with **Desktop development with C++**
@@ -22,30 +32,18 @@ The Windows test mode displays the existing sample card and exits after nine sec
 - Qt modules: **Widgets** and **Network**
 - CMake 3.20 or newer
 
-## Build from PowerShell
-
-Run these commands from the repository root after installing Qt and Visual Studio:
+From the repository root in PowerShell:
 
 ```powershell
 cmake -S overlay/kde-media-flyout-overlay -B build -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.x.x/msvc2022_64"
 cmake --build build --config Release
 ```
 
-Replace the example Qt path with the actual installed Qt version and directory.
-
-Run the preview:
-
-```powershell
-.\build\Release\MediaTable.exe --test
-```
-
-The preview should show the actual MediaTable test card with its existing artwork/vinyl presentation, animations, compact-to-expanded hover behaviour, and settings menu.
-
 ## Next milestones
 
 1. **Windows media sessions:** implement a Windows Global System Media Transport Controls (GSMTC) provider and map session metadata, artwork, playback state, position, and transport controls into the shared player model.
 2. **Desktop-aware behaviour:** replace the KWin visibility helper with Windows foreground-window/occlusion monitoring; verify the hot corner and always-on-top behaviour.
-3. **Packaging:** add Qt runtime deployment, autostart support, and a Windows installer.
+3. **Packaging:** add Windows autostart support and a Windows installer.
 
 ## Guardrails
 
