@@ -12,9 +12,11 @@ The `--test` preview remains available and shows a persistent sample card for up
 
 ## Download and run
 
-Download the **MediaTable-Windows-preview** artifact from the latest successful Windows build workflow on the `windows-port` branch. Extract the ZIP once, then double-click `Run-MediaTable-Preview.bat`.
+Download the **MediaTable-Windows-preview** artifact from the latest successful Windows build workflow on the `windows-port` branch. Extract the ZIP once.
 
-The preview should appear near the top-left of the primary display. The launcher keeps a command window open and writes startup output to `MediaTable-startup.log`. If no player window appears, share the log contents so the startup failure can be diagnosed.
+For real media playback, start Spotify (or another app with Windows media-session support) and double-click `Run-MediaTable.bat`. MediaTable will show the active session when Windows exposes it. The launcher keeps a command window open and writes startup output to `MediaTable-startup.log`.
+
+For a visual-only demonstration, double-click `Run-MediaTable-Preview.bat`. This displays a sample card and does not connect to media sessions. If the normal launcher finds no player, share the log contents so the issue can be diagnosed.
 
 Keep the Qt DLLs and plugin folders next to `MediaTable.exe`; do not move the executable out of the extracted folder.
 
