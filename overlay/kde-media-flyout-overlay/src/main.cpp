@@ -1,11 +1,6 @@
+#ifndef Q_OS_WIN
 #include <LayerShellQt/Shell>
 #include <LayerShellQt/Window>
-
-#include <QApplication>
-#include <QAction>
-#include <QActionGroup>
-#include <QColor>
-#include <QCursor>
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -13,6 +8,15 @@
 #include <QDBusPendingCallWatcher>
 #include <QDBusReply>
 #include <QDBusVariant>
+#endif
+
+#include <QApplication>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QAction>
+#include <QActionGroup>
+#include <QColor>
+#include <QCursor>
 #include <QEasingCurve>
 #include <QElapsedTimer>
 #include <QEnterEvent>
@@ -80,10 +84,12 @@ constexpr int SelectedPlayerMissingGraceMilliseconds = 3000;
 constexpr double VinylRotationDegreesPerSecond = 6.0; // one turn per minute
 constexpr qint64 WheelSeekStepUsec = 5LL * 1000000LL;
 constexpr double Pi = 3.14159265358979323846;
+#ifndef Q_OS_WIN
 constexpr auto MprisPath = "/org/mpris/MediaPlayer2";
 constexpr auto PlayerInterface = "org.mpris.MediaPlayer2.Player";
 constexpr auto RootInterface = "org.mpris.MediaPlayer2";
 constexpr auto PropertiesInterface = "org.freedesktop.DBus.Properties";
+#endif
 QString normalizeArtworkUrl(QString value)
 {
     value = value.trimmed();
@@ -105,6 +111,7 @@ QString normalizeArtworkUrl(QString value)
     return value;
 }
 
+#ifndef Q_OS_WIN
 QVariant unwrapDbusVariant(const QVariant &value)
 {
     if (value.metaType().id() == qMetaTypeId<QDBusVariant>()) {
@@ -182,6 +189,7 @@ QVariantMap callPropertyGetAll(const QDBusConnection &bus,
 
     return toVariantMap(reply.arguments().constFirst());
 }
+#endif // !Q_OS_WIN
 
 struct PlayerState
 {
@@ -305,6 +313,7 @@ QColor sampleArtworkAccent(const QImage &source)
     return QColor(145, 158, 181);
 }
 
+#ifndef Q_OS_WIN
 bool hasUsableTrackMetadata(const PlayerState &state)
 {
     // Browser MPRIS sessions often omit xesam:artist (the reader substitutes
@@ -427,6 +436,7 @@ QList<PlayerState> findPlayers(const QDBusConnection &bus)
 
     return players;
 }
+#endif // !Q_OS_WIN
 
 class MediaOverlay final : public QWidget
 {
@@ -481,7 +491,12 @@ public:
         setAttribute(Qt::WA_ShowWithoutActivating, true);
         setFocusPolicy(Qt::NoFocus);
         setMouseTracking(true);
-        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus);
+        Qt::WindowFlags overlayFlags =
+            Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus;
+#ifdef Q_OS_WIN
+        overlayFlags |= Qt::Tool | Qt::WindowStaysOnTopHint;
+#endif
+        setWindowFlags(overlayFlags);
 
         m_hoverCollapseTimer.setSingleShot(true);
         m_hoverCollapseTimer.setInterval(HoverCollapseDelayMilliseconds);
@@ -608,11 +623,13 @@ public:
         });
     }
 
+#ifndef Q_OS_WIN
     void setLayerWindow(LayerShellQt::Window *layerWindow)
     {
         m_layerWindow = layerWindow;
         syncLayerSurfaceGeometry();
     }
+#endif
 
     void activateOnDesktop()
     {
@@ -2113,6 +2130,16 @@ private:
 
     void syncLayerSurfaceGeometry()
     {
+#ifdef Q_OS_WIN
+        // Windows uses a normal top-level Qt window instead of a Wayland layer
+        // surface. Keep the card anchored to the primary screen's top-left.
+        const QScreen *screen = QGuiApplication::primaryScreen();
+        if (!screen) {
+            return;
+        }
+        const QPoint offset = m_hotCornerOnly ? QPoint(0, 0) : QPoint(18, 18);
+        move(screen->geometry().topLeft() + offset);
+#else
         if (!m_layerWindow) {
             return;
         }
@@ -2124,6 +2151,7 @@ private:
             m_layerWindow->setDesiredSize(QSize(CardWidth, height()));
             m_layerWindow->setMargins(QMargins(18, 18, 0, 0));
         }
+#endif
     }
 
     void enterHotCornerMode()
@@ -2352,7 +2380,9 @@ private:
     std::function<void(const QString &)> m_controlCallback;
     std::function<void(qint64)> m_seekCallback;
     std::function<void()> m_playerSwitchCallback;
+#ifndef Q_OS_WIN
     LayerShellQt::Window *m_layerWindow = nullptr;
+#endif
     qint64 m_pendingSeekUsec = 0;
     qint64 m_previewPositionUsec = 0;
     qint64 m_positionOverrideUsec = 0;
@@ -2394,7 +2424,12 @@ public:
         setAttribute(Qt::WA_ShowWithoutActivating, true);
         setFocusPolicy(Qt::NoFocus);
         setMouseTracking(true);
-        setWindowFlags(Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus);
+        Qt::WindowFlags hotCornerFlags =
+            Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus;
+#ifdef Q_OS_WIN
+        hotCornerFlags |= Qt::Tool | Qt::WindowStaysOnTopHint;
+#endif
+        setWindowFlags(hotCornerFlags);
         setWindowTitle(QStringLiteral("MediaTable Hot Corner"));
     }
 
@@ -2422,6 +2457,7 @@ private:
 
 } // namespace
 
+#ifndef Q_OS_WIN
 // Receives popup-area occlusion updates from the KWin helper.
 class PopupAreaBridge final : public QObject
 {
@@ -3133,23 +3169,52 @@ private:
     bool m_testMode = false;
     bool m_haveCurrentPlayer = false;
 };
+#endif // !Q_OS_WIN
 
 int main(int argc, char *argv[])
 {
-    // Qt 6.5+ selects LayerShellQt through the Wayland shell integration automatically.
-
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("THXS"));
     QCoreApplication::setApplicationName(QStringLiteral("MediaTable"));
     QCoreApplication::setApplicationVersion(QStringLiteral("0.5.37"));
 
+    const bool testMode = app.arguments().contains(QStringLiteral("--test-compact"))
+        || app.arguments().contains(QStringLiteral("--test"));
+
+#ifdef Q_OS_WIN
+    MediaOverlay overlay;
+    overlay.setWindowTitle(QStringLiteral("MediaTable"));
+
+    // Keep an independent, invisible summon target in the top-left corner.
+    PopupHotCorner hotCorner(&overlay);
+    if (const QScreen *screen = QGuiApplication::primaryScreen()) {
+        hotCorner.setGeometry(QRect(screen->geometry().topLeft(),
+                                    QSize(HotCornerSize, HotCornerSize)));
+    } else {
+        hotCorner.setGeometry(0, 0, HotCornerSize, HotCornerSize);
+    }
+    hotCorner.show();
+    hotCorner.raise();
+
+    // The Windows media-session backend is a later milestone. Test mode already
+    // exercises the real shared player UI without depending on a media session.
+    overlay.setPopupAreaBlocked(false);
+    if (testMode) {
+        QTimer::singleShot(250, &overlay, [&overlay] {
+            overlay.showTestCard();
+        });
+        QTimer::singleShot(9000, &app, &QCoreApplication::quit);
+    } else {
+        qInfo() << "Windows media integration is not available yet. "
+                   "Launch with --test to preview the MediaTable overlay.";
+    }
+
+    return app.exec();
+#else
     if (QGuiApplication::platformName() != QStringLiteral("wayland")) {
         qCritical() << "MediaTable needs a Wayland session.";
         return 2;
     }
-
-    const bool testMode = app.arguments().contains(QStringLiteral("--test-compact"))
-        || app.arguments().contains(QStringLiteral("--test"));
 
     MediaOverlay overlay;
     overlay.setWindowTitle(QStringLiteral("MediaTable"));
@@ -3229,6 +3294,9 @@ int main(int argc, char *argv[])
     Q_UNUSED(controller);
 
     return app.exec();
+}
+
+#endif
 }
 
 #include "main.moc"
