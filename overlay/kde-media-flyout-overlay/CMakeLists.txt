@@ -29,6 +29,18 @@ if(WIN32)
         NOMINMAX
         WIN32_LEAN_AND_MEAN
     )
+
+    # GSMTC is exposed through C++/WinRT in the Windows SDK.
+    file(GLOB _windows_sdk_cppwinrt_dirs
+        "$ENV{WindowsSdkDir}/Include/*/cppwinrt")
+    if(_windows_sdk_cppwinrt_dirs)
+        list(SORT _windows_sdk_cppwinrt_dirs COMPARE NATURAL ORDER DESCENDING)
+        list(GET _windows_sdk_cppwinrt_dirs 0 _windows_sdk_cppwinrt_dir)
+        target_include_directories(kde-media-flyout-overlay SYSTEM PRIVATE
+            "${_windows_sdk_cppwinrt_dir}")
+    endif()
+
+    target_link_libraries(kde-media-flyout-overlay PRIVATE windowsapp)
     set_target_properties(kde-media-flyout-overlay PROPERTIES
         OUTPUT_NAME "MediaTable"
     )
